@@ -6,6 +6,7 @@ from format_convert.jianzhi.batch_convert import (
     build_convert_command,
     discover_mcaps,
     is_completed_status,
+    is_complete_output,
     output_dir_for,
     status_and_log_paths,
     status_from_return,
@@ -87,3 +88,18 @@ def test_completed_status_accepts_done_and_converter_skip(tmp_path: Path):
 
     status_path.write_text(json.dumps({"status": "failed"}))
     assert not is_completed_status(status_path)
+
+
+def test_complete_output_requires_non_empty_episodes_file(tmp_path: Path):
+    out_dir = tmp_path / "converted"
+    meta = out_dir / "meta"
+    meta.mkdir(parents=True)
+    (meta / "info.json").write_text("{}")
+
+    assert not is_complete_output(out_dir)
+
+    (meta / "episodes.jsonl").write_text("")
+    assert not is_complete_output(out_dir)
+
+    (meta / "episodes.jsonl").write_text('{"episode_index": 0}\n')
+    assert is_complete_output(out_dir)

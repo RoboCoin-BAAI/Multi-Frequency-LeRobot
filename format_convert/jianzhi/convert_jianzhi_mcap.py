@@ -481,6 +481,24 @@ def validate_camera_frame_counts(records: dict[str, Any]) -> tuple[bool, str]:
     return True, ""
 
 
+def filter_convertible_records(
+    mcap_files: list[Path],
+    records_by_episode: list[dict[str, Any]],
+) -> tuple[list[Path], list[dict[str, Any]], int]:
+    kept_files: list[Path] = []
+    kept_records: list[dict[str, Any]] = []
+    skipped = 0
+    for path, records in zip(mcap_files, records_by_episode):
+        cameras_ok, reason = validate_camera_frame_counts(records)
+        if not cameras_ok:
+            skipped += 1
+            print(f"[skip] {path.name}: {reason}")
+            continue
+        kept_files.append(path)
+        kept_records.append(records)
+    return kept_files, kept_records, skipped
+
+
 def nearest_indices(source_ts: list[float], target_ts: list[float]) -> np.ndarray:
     src = np.asarray(source_ts, dtype=np.float64)
     tgt = np.asarray(target_ts, dtype=np.float64)
@@ -711,6 +729,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[read] {path}")
         records_by_episode.append(read_mcap(path))
 
+    skipped = 0
+    if not args.calibrations_only:
+        mcap_files, records_by_episode, skipped = filter_convertible_records(mcap_files, records_by_episode)
+        if not records_by_episode:
+            print("[done] 0 episodes, 0 frames")
+            if skipped:
+                print(f"[skipped] {skipped} episode(s) with inconsistent camera frame counts")
+            return 0
+
     specs = feature_specs(records_by_episode)
     if not specs:
         print("[error] no convertible streams found")
@@ -738,7 +765,6 @@ def main(argv: list[str] | None = None) -> int:
     annotations_path = write_annotations(args.out, records_by_episode)
 
     video_keys = [key for key, spec in specs.items() if spec.get("dtype") == "video"]
-    skipped = 0
     for ep_idx, (path, records) in enumerate(zip(mcap_files, records_by_episode)):
         print(f"[episode {ep_idx}] {path.name}")
         wrote = write_episode(ds, path, records, specs, args.video_mode)

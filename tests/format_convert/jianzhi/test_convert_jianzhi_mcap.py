@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 
 import pytest
 
@@ -7,6 +8,7 @@ from format_convert.jianzhi.convert_jianzhi_mcap import (
     feature_specs,
     hand_mano_to_vec,
     hand_points_to_vec,
+    main,
     transform_vec7_to_matrix,
     master_timestamps,
     validate_camera_frame_counts,
@@ -222,3 +224,33 @@ def test_feature_specs_use_head_pose_names():
     assert "observation.relative_head_pose" in specs
     assert "observation.state" not in specs
     assert "observation.relative_eef_pose" not in specs
+
+
+def test_main_does_not_create_output_when_all_episodes_are_skipped(tmp_path: Path, monkeypatch):
+    mcap = tmp_path / "bad.mcap"
+    out_dir = tmp_path / "out"
+    mcap.write_bytes(b"not a real mcap")
+    bad_records = {
+        "source_path": str(mcap),
+        "calibrations": {},
+        "camera_packets": {
+            "observation.images.head_left_outer1": [(0.0, b"a")],
+            "observation.images.head_left_outer0": [(0.0, b"a")],
+            "observation.images.head_left": [(0.0, b"a")],
+            "observation.images.head_right": [(0.0, b"a")],
+            "observation.images.head_right_outer0": [(0.0, b"a")],
+            "observation.images.head_right_outer1": [(0.0, b"a"), (1.0, b"b")],
+        },
+        "streams": {},
+    }
+
+    monkeypatch.setattr(
+        "format_convert.jianzhi.convert_jianzhi_mcap.require_full_conversion_dependencies",
+        lambda video_mode: None,
+    )
+    monkeypatch.setattr("format_convert.jianzhi.convert_jianzhi_mcap.read_mcap", lambda path: bad_records)
+
+    exit_code = main([str(mcap), "--out", str(out_dir), "--force"])
+
+    assert exit_code == 0
+    assert not out_dir.exists()

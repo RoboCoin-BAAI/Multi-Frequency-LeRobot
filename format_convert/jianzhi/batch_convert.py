@@ -69,6 +69,17 @@ def is_completed_status(status_path: Path) -> bool:
     return status in COMPLETED_STATUSES
 
 
+def is_complete_output(out_dir: Path) -> bool:
+    info_path = out_dir / "meta" / "info.json"
+    episodes_path = out_dir / "meta" / "episodes.jsonl"
+    if not info_path.is_file() or not episodes_path.is_file():
+        return False
+    try:
+        return episodes_path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def status_from_return(returncode: int, stdout: str, stderr: str) -> str:
     if returncode != 0:
         return "failed"
@@ -115,7 +126,7 @@ def run_one(
     status_path, log_path = status_and_log_paths(source, out, mcap)
     command = build_convert_command(mcap, out_dir, video_mode=video_mode)
 
-    if resume and is_completed_status(status_path):
+    if resume and (is_completed_status(status_path) or is_complete_output(out_dir)):
         payload = {
             "status": "skipped_existing",
             "source": str(mcap),

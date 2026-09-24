@@ -49,8 +49,15 @@ The batch script preserves the source relative layout. For example:
 
 Each MCAP is converted by an independent subprocess. Batch logs are written to
 `<out>/_batch_logs/.../*.log`, and resumable status files are written to
-`<out>/_batch_status/.../*.json`. By default, items marked `done` or
-`skipped_by_converter` are not rerun.
+`<out>/_batch_status/.../*.json`. By default, items are not rerun when either:
+
+- their status file is marked `done` or `skipped_by_converter`;
+- their output directory already contains a non-empty LeRobot
+  `meta/episodes.jsonl` together with `meta/info.json`.
+
+If an MCAP is skipped because the six head cameras do not have identical frame
+counts, the converter exits without creating that MCAP's output dataset
+directory.
 
 Use `--dry-run --limit N` to inspect the planned paths before launching a large
 job. Start with `--workers 2` on NAS storage; increase only after checking that
