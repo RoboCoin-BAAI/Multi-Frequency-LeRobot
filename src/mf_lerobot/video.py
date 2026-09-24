@@ -61,6 +61,22 @@ class VideoFeature:
         self._timestamps.append(timestamp)
         self._frame_count += 1
 
+    def add_external_video(self, timestamps: list[float] | np.ndarray) -> Path:
+        """Register an already-written MP4 for this episode.
+
+        Converters can write video directly to ``video_path`` (for example via
+        H264 remux) and use this method to let ``save()`` write the matching
+        timestamp parquet without creating PNG intermediates.
+        """
+        chunks_size = self.spec.get("chunks_size", 1000)
+        ep_chunk = self._ep_idx // chunks_size
+        video_path = self.root / DEFAULT_VIDEO_PATH.format(
+            episode_chunk=ep_chunk, video_key=self.key, episode_index=self._ep_idx,
+        )
+        self._timestamps = [float(t) for t in timestamps]
+        self._frame_count = len(self._timestamps)
+        return video_path
+
     def save(self) -> None:
         from lerobot.datasets.video_utils import encode_video_frames
 

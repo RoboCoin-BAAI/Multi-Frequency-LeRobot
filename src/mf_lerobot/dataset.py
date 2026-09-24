@@ -110,6 +110,7 @@ class MultiFrequencyLeRobotDataset(LeRobotDataset):
         robot_type: str | None = None,
         root: str | Path | None = None,
         use_videos: bool = True,
+        master_feature: str | None = None,
         image_writer_processes: int = 0,
         image_writer_threads: int = 0,
         video_backend: str | None = None,
@@ -122,6 +123,7 @@ class MultiFrequencyLeRobotDataset(LeRobotDataset):
 
         meta = MultiFrequencyDatasetMetadata.create(
             repo_id=repo_id, fps=fps, features=features,
+            master_feature=master_feature,
             robot_type=robot_type, root=root, use_videos=use_videos,
         )
 
