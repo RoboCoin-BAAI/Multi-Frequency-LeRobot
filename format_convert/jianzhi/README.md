@@ -29,6 +29,17 @@ frames.
 High-rate non-camera streams such as IMU may have different sample counts and
 are kept on their own timestamps.
 
+To accept small camera drops, opt in explicitly:
+
+```bash
+--camera-frame-policy pad --max-pad-frames 2
+```
+
+Padding chooses the longest camera stream as the target timestamp axis and
+duplicates the nearest packet/frame for any camera with missing samples. If any
+camera is missing more than `--max-pad-frames` frames, the MCAP is still
+skipped.
+
 ## Batch Conversion
 
 For the 1000h NAS tree, run:
@@ -37,7 +48,9 @@ For the 1000h NAS tree, run:
 python format_convert/jianzhi/batch_convert.py \
   --source /mnt/nas/synnas/jianzhi1000h/genrobot_BAAI_ego_1000h_细标_0918-dt-h5mdjncv \
   --out /mnt/nas/synnas/jianzhi1000h/jianzhi-lerobot \
-  --workers 2
+  --workers 2 \
+  --camera-frame-policy pad \
+  --max-pad-frames 2
 ```
 
 The batch script preserves the source relative layout. For example:

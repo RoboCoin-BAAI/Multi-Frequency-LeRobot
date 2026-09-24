@@ -46,7 +46,14 @@ def status_and_log_paths(source: Path, out: Path, mcap: Path) -> tuple[Path, Pat
     )
 
 
-def build_convert_command(mcap: Path, out_dir: Path, *, video_mode: str) -> list[str]:
+def build_convert_command(
+    mcap: Path,
+    out_dir: Path,
+    *,
+    video_mode: str,
+    camera_frame_policy: str = "strict",
+    max_pad_frames: int = 0,
+) -> list[str]:
     return [
         sys.executable,
         str(CONVERTER_SCRIPT),
@@ -56,6 +63,10 @@ def build_convert_command(mcap: Path, out_dir: Path, *, video_mode: str) -> list
         "--force",
         "--video-mode",
         video_mode,
+        "--camera-frame-policy",
+        camera_frame_policy,
+        "--max-pad-frames",
+        str(max_pad_frames),
     ]
 
 
@@ -120,11 +131,19 @@ def run_one(
     mcap: Path,
     *,
     video_mode: str,
+    camera_frame_policy: str,
+    max_pad_frames: int,
     resume: bool,
 ) -> dict[str, Any]:
     out_dir = output_dir_for(source, out, mcap)
     status_path, log_path = status_and_log_paths(source, out, mcap)
-    command = build_convert_command(mcap, out_dir, video_mode=video_mode)
+    command = build_convert_command(
+        mcap,
+        out_dir,
+        video_mode=video_mode,
+        camera_frame_policy=camera_frame_policy,
+        max_pad_frames=max_pad_frames,
+    )
 
     if resume and (is_completed_status(status_path) or is_complete_output(out_dir)):
         payload = {
@@ -174,6 +193,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", type=Path, required=True, help="batch output root")
     parser.add_argument("--workers", type=int, default=2, help="parallel converter subprocesses")
     parser.add_argument("--video-mode", choices=("remux", "decode"), default="remux")
+    parser.add_argument("--camera-frame-policy", choices=("strict", "pad"), default="strict")
+    parser.add_argument("--max-pad-frames", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None, help="convert only first N files")
     parser.add_argument("--dry-run", action="store_true", help="print planned input/output pairs without converting")
     parser.add_argument("--no-resume", action="store_true", help="rerun items even if batch status says completed")
@@ -185,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.workers < 1:
         print("[error] --workers must be >= 1")
         return 1
+    if args.max_pad_frames < 0:
+        print("[error] --max-pad-frames must be >= 0")
+        return 1
 
     mcaps = discover_mcaps(args.source)
     if args.limit is not None:
@@ -193,7 +217,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[error] no .mcap/.macp files found under {args.source}")
         return 1
 
-    print(f"[batch] {len(mcaps)} file(s), workers={args.workers}, video_mode={args.video_mode}")
+    print(
+        f"[batch] {len(mcaps)} file(s), workers={args.workers}, "
+        f"video_mode={args.video_mode}, camera_frame_policy={args.camera_frame_policy}, "
+        f"max_pad_frames={args.max_pad_frames}"
+    )
     if args.dry_run:
         for mcap in mcaps:
             print(f"[plan] {mcap} -> {output_dir_for(args.source, args.out, mcap)}")
@@ -208,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 mcap,
                 video_mode=args.video_mode,
+                camera_frame_policy=args.camera_frame_policy,
+                max_pad_frames=args.max_pad_frames,
                 resume=not args.no_resume,
             )
             for mcap in mcaps

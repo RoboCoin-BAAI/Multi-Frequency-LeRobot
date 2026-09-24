@@ -481,15 +481,63 @@ def validate_camera_frame_counts(records: dict[str, Any]) -> tuple[bool, str]:
     return True, ""
 
 
+def _nearest_packet(target_t: float, samples: list[tuple[float, bytes]]) -> bytes:
+    best_t, best_packet = min(samples, key=lambda sample: abs(sample[0] - target_t))
+    return best_packet
+
+
+def normalize_camera_frame_counts(
+    records: dict[str, Any],
+    camera_frame_policy: str,
+    max_pad_frames: int,
+) -> tuple[bool, str]:
+    if camera_frame_policy == "strict":
+        return validate_camera_frame_counts(records)
+
+    camera_samples: dict[str, list[tuple[float, bytes]]] = {}
+    for idx in range(CAMERA_COUNT):
+        key = JIANZHI_CAMERA_FEATURES[idx]
+        samples = records["camera_packets"].get(key, [])
+        if not samples:
+            return False, f"missing camera stream: {key}"
+        camera_samples[key] = samples
+
+    target_key, target_samples = max(camera_samples.items(), key=lambda item: len(item[1]))
+    target_count = len(target_samples)
+    target_timestamps = [t for t, _ in target_samples]
+    padded: dict[str, int] = {}
+
+    for key, samples in camera_samples.items():
+        missing = target_count - len(samples)
+        if missing < 0:
+            return False, f"camera stream has more frames than target: {key}"
+        if missing > max_pad_frames:
+            return False, f"{key} missing {missing} frames, max pad is {max_pad_frames}"
+        if missing == 0:
+            records["camera_packets"][key] = list(samples)
+            continue
+        records["camera_packets"][key] = [
+            (target_t, _nearest_packet(target_t, samples))
+            for target_t in target_timestamps
+        ]
+        padded[key] = missing
+
+    if padded:
+        print(f"[pad] camera frames to {target_count} using {target_key}: {padded}")
+    return True, ""
+
+
 def filter_convertible_records(
     mcap_files: list[Path],
     records_by_episode: list[dict[str, Any]],
+    camera_frame_policy: str = "strict",
+    max_pad_frames: int = 0,
 ) -> tuple[list[Path], list[dict[str, Any]], int]:
     kept_files: list[Path] = []
     kept_records: list[dict[str, Any]] = []
     skipped = 0
     for path, records in zip(mcap_files, records_by_episode):
-        cameras_ok, reason = validate_camera_frame_counts(records)
+        cameras_ok, reason = normalize_camera_frame_counts(records, camera_frame_policy, max_pad_frames)
         if not cameras_ok:
             skipped += 1
             print(f"[skip] {path.name}: {reason}")
@@ -558,8 +606,10 @@ def write_episode(
     records: dict[str, Any],
     specs: dict[str, dict[str, Any]],
     video_mode: str,
+    camera_frame_policy: str = "strict",
+    max_pad_frames: int = 0,
 ) -> bool:
-    cameras_ok, reason = validate_camera_frame_counts(records)
+    cameras_ok, reason = normalize_camera_frame_counts(records, camera_frame_policy, max_pad_frames)
     if not cameras_ok:
         print(f"[skip] {mcap_path.name}: {reason}")
         return False
@@ -687,6 +737,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="only export camera calibration files; does not require lerobot/torch",
     )
+    parser.add_argument(
+        "--camera-frame-policy",
+        choices=("strict", "pad"),
+        default="strict",
+        help="strictly require equal camera frame counts or pad small gaps (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--max-pad-frames",
+        type=int,
+        default=0,
+        help="maximum frames to pad per camera when --camera-frame-policy=pad",
+    )
     return parser.parse_args(argv)
 
 
@@ -707,6 +769,9 @@ def resolve_inputs(args: argparse.Namespace) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.max_pad_frames < 0:
+        print("[error] --max-pad-frames must be >= 0")
+        return 1
     mcap_files = resolve_inputs(args)
     if not mcap_files:
         print(f"[error] no .mcap/.macp files found under {args.source}")
@@ -731,7 +796,12 @@ def main(argv: list[str] | None = None) -> int:
 
     skipped = 0
     if not args.calibrations_only:
-        mcap_files, records_by_episode, skipped = filter_convertible_records(mcap_files, records_by_episode)
+        mcap_files, records_by_episode, skipped = filter_convertible_records(
+            mcap_files,
+            records_by_episode,
+            camera_frame_policy=args.camera_frame_policy,
+            max_pad_frames=args.max_pad_frames,
+        )
         if not records_by_episode:
             print("[done] 0 episodes, 0 frames")
             if skipped:
@@ -767,7 +837,15 @@ def main(argv: list[str] | None = None) -> int:
     video_keys = [key for key, spec in specs.items() if spec.get("dtype") == "video"]
     for ep_idx, (path, records) in enumerate(zip(mcap_files, records_by_episode)):
         print(f"[episode {ep_idx}] {path.name}")
-        wrote = write_episode(ds, path, records, specs, args.video_mode)
+        wrote = write_episode(
+            ds,
+            path,
+            records,
+            specs,
+            args.video_mode,
+            camera_frame_policy=args.camera_frame_policy,
+            max_pad_frames=args.max_pad_frames,
+        )
         if not wrote:
             skipped += 1
             continue

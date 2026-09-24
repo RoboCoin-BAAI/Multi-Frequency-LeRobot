@@ -6,9 +6,11 @@ import pytest
 from format_convert.jianzhi.convert_jianzhi_mcap import (
     camera_calibration_to_kalibr,
     feature_specs,
+    filter_convertible_records,
     hand_mano_to_vec,
     hand_points_to_vec,
     main,
+    normalize_camera_frame_counts,
     transform_vec7_to_matrix,
     master_timestamps,
     validate_camera_frame_counts,
@@ -206,6 +208,71 @@ def test_validate_camera_frame_counts_accepts_equal_camera_counts():
 
     assert ok is True
     assert reason == ""
+
+
+def test_normalize_camera_frame_counts_pads_up_to_two_frames():
+    records = {
+        "camera_packets": {
+            "observation.images.head_left_outer1": [(0.0, b"o1-0"), (1.0, b"o1-1"), (2.0, b"o1-2")],
+            "observation.images.head_left_outer0": [(0.0, b"o0-0"), (2.0, b"o0-2")],
+            "observation.images.head_left": [(0.0, b"hl-0"), (1.0, b"hl-1")],
+            "observation.images.head_right": [(0.0, b"hr-0"), (1.0, b"hr-1"), (2.0, b"hr-2")],
+            "observation.images.head_right_outer0": [(0.0, b"ro0-0"), (1.0, b"ro0-1"), (2.0, b"ro0-2")],
+            "observation.images.head_right_outer1": [(0.0, b"ro1-0"), (1.0, b"ro1-1"), (2.0, b"ro1-2")],
+        },
+    }
+
+    ok, reason = normalize_camera_frame_counts(records, "pad", max_pad_frames=2)
+
+    assert ok is True
+    assert reason == ""
+    assert [t for t, _ in records["camera_packets"]["observation.images.head_left"]] == [0.0, 1.0, 2.0]
+    assert [p for _, p in records["camera_packets"]["observation.images.head_left"]] == [b"hl-0", b"hl-1", b"hl-1"]
+    assert [p for _, p in records["camera_packets"]["observation.images.head_left_outer0"]] == [b"o0-0", b"o0-0", b"o0-2"]
+
+
+def test_normalize_camera_frame_counts_rejects_more_than_two_missing_frames():
+    records = {
+        "camera_packets": {
+            "observation.images.head_left_outer1": [(float(i), b"a") for i in range(5)],
+            "observation.images.head_left_outer0": [(0.0, b"a"), (1.0, b"a")],
+            "observation.images.head_left": [(float(i), b"a") for i in range(5)],
+            "observation.images.head_right": [(float(i), b"a") for i in range(5)],
+            "observation.images.head_right_outer0": [(float(i), b"a") for i in range(5)],
+            "observation.images.head_right_outer1": [(float(i), b"a") for i in range(5)],
+        },
+    }
+
+    ok, reason = normalize_camera_frame_counts(records, "pad", max_pad_frames=2)
+
+    assert ok is False
+    assert "missing 3 frames" in reason
+
+
+def test_filter_convertible_records_accepts_padded_camera_counts(tmp_path: Path):
+    mcap = tmp_path / "pad.mcap"
+    records = {
+        "camera_packets": {
+            "observation.images.head_left_outer1": [(0.0, b"a"), (1.0, b"b"), (2.0, b"c")],
+            "observation.images.head_left_outer0": [(0.0, b"a"), (1.0, b"b"), (2.0, b"c")],
+            "observation.images.head_left": [(0.0, b"a"), (1.0, b"b")],
+            "observation.images.head_right": [(0.0, b"a"), (1.0, b"b"), (2.0, b"c")],
+            "observation.images.head_right_outer0": [(0.0, b"a"), (1.0, b"b"), (2.0, b"c")],
+            "observation.images.head_right_outer1": [(0.0, b"a"), (1.0, b"b"), (2.0, b"c")],
+        },
+    }
+
+    kept_files, kept_records, skipped = filter_convertible_records(
+        [mcap],
+        [records],
+        camera_frame_policy="pad",
+        max_pad_frames=2,
+    )
+
+    assert kept_files == [mcap]
+    assert kept_records == [records]
+    assert skipped == 0
+    assert len(records["camera_packets"]["observation.images.head_left"]) == 3
 
 
 def test_feature_specs_use_head_pose_names():

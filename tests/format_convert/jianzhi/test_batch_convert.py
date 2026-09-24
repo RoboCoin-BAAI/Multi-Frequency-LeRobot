@@ -68,7 +68,26 @@ def test_build_convert_command_targets_one_mcap_and_forces_item_output(tmp_path:
         "--force",
         "--video-mode",
         "remux",
+        "--camera-frame-policy",
+        "strict",
+        "--max-pad-frames",
+        "0",
     ]
+
+
+def test_build_convert_command_can_enable_padding_policy(tmp_path: Path):
+    mcap = tmp_path / "input.mcap"
+    out_dir = tmp_path / "out" / "input"
+
+    command = build_convert_command(
+        mcap,
+        out_dir,
+        video_mode="remux",
+        camera_frame_policy="pad",
+        max_pad_frames=2,
+    )
+
+    assert command[-4:] == ["--camera-frame-policy", "pad", "--max-pad-frames", "2"]
 
 
 def test_status_from_return_marks_converter_skip():
